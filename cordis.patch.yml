@@ -1,0 +1,5 @@
+# 需求判断器（Host-only bundle）：插入一行，apply 里注册 need_route 工具
+# 和一段极短的系统提示词，提示模型在跨领域请求上先问一次路由。
+- insert:
+    - id: need-router
+      name: dsh-need-router

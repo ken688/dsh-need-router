@@ -1,0 +1,33 @@
+{
+  "name": "dsh-need-router",
+  "version": "0.1.0",
+  "description": "需求判断器：读一条请求，判定它属于哪些能力域，返回该调用的技能与工具短名单，让模型不再盲扫全部能力。",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "license": "MIT"
+}
