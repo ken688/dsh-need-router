@@ -2,7 +2,6 @@
   "name": "dsh-need-router",
   "version": "0.1.0",
   "description": "需求判断器：读一条请求，判定它属于哪些能力域，返回该调用的技能与工具短名单，让模型不再盲扫全部能力。",
-  "private": true,
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -29,5 +28,23 @@
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/schemastery": "*"
   },
-  "license": "MIT"
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "agent",
+    "router",
+    "skill-routing",
+    "llm"
+  ],
+  "author": "ken688",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ken688/dsh-need-router.git"
+  },
+  "homepage": "https://github.com/ken688/dsh-need-router#readme",
+  "bugs": {
+    "url": "https://github.com/ken688/dsh-need-router/issues"
+  }
 }

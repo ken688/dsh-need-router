@@ -1,5 +1,7 @@
 # dsh-need-router（需求判断器）
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 按「一条请求」判断它落在哪些能力域，给出**该调用的技能与工具短名单 + 第一步做什么**，并列出**本次可以跳过**的域。
 
 ## 装了什么
@@ -52,3 +54,9 @@ CAD 制图、电路与 EDA、Office 文档、数据分析、视频与音频、�
 
 删除 profile `package.json` 里 `dsh-need-router` 依赖并重跑 `dsh plugin --profile desktop install`，
 或直接从插件市场停用。
+
+## 许可证
+
+[MIT](LICENSE) © 2026 ken688
+
+可自由使用、修改、分发与商用，仅需保留版权与许可声明。
