@@ -80,6 +80,12 @@ test('inventory truncates long tool lists', () => {
   assert.match(text, /\+60/)
 })
 
+test('inventory tolerates a partial snapshot', () => {
+  const text = renderInventory({})
+  assert.match(text, /插件（已装）: 0/)
+  assert.match(text, /本会话可见工具: 0/)
+})
+
 test('source tags stay short and localised', () => {
   assert.equal(sourceTag('bundled', 'zh'), '内置')
   assert.equal(sourceTag('user-agents', 'zh'), '用户')

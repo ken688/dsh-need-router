@@ -40,7 +40,13 @@ author's machine.
 
 - `mode=json` output for scripts and tests.
 - Tool-evidence pass that reads the bodies of the top recommended skills (cached,
-  bounded, 2 s timeout) to find tools the skill actually tells you to use.
+  bounded, 2 s timeout) to find tools the skill actually tells you to use; ordinary
+  words such as `memory` only count when the body references them as a code span.
+- Tool-name ↔ domain-vocabulary bridge: a whole token of a tool name that equals a
+  keyword of a matched domain (e.g. `memory` ↔ the memory domain) is evidence, which
+  makes Chinese requests recommend generic tools on an English-described host.
+- Explicit "known limits" note in the docs: matching is lexical, so a Chinese request
+  against an English-only skill corpus returns domain guidance but no skill picks.
 - Dependency-free test suite (`node --test`) covering text matching, taxonomy,
   scoring, rendering and discovery fallbacks.
 - `README.md` (English), `README.zh-CN.md` (Chinese), `CONTRIBUTING.md`.

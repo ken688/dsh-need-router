@@ -248,6 +248,7 @@ The arithmetic that justifies it: a single call that stops you from loading one 
 - **What it reads:** the host's merged skill registry (when present), this session's visible tool schemas, and the profile `package.json` dependency names. Only in the filesystem fallback does it scan skill directories: `<root>/<skill>/SKILL.md` under the project's `.agents/skills` and `.claude/skills`, then `~/.agents/skills`, `~/.dsh/skills`, `~/.claude/skills`, `~/.codex/skills`, any other `~/.<dir>/skills`, plus `skillRoots`.
 - **It routes; it does not act.** It never loads a skill, calls a tool, or re-ranks by model preference. It has no memory of past calls beyond the caches.
 - **It can be wrong.** Domains are keyword-driven; a request worded unusually may land in a neighbouring domain. That is why `firstAction` advice is phrased as advice and not as a gate.
+- **Cross-lingual matching is lexical, not semantic.** Domain vocabulary is bilingual, so a Chinese request still finds the right capability area on an English-only machine. Skill and tool *names and descriptions* are matched in their own language, though: with a corpus whose descriptions are English only, a Chinese request may return the domain and no skill picks. It never invents a name; adding Chinese descriptions (or Chinese keywords) to your skills fixes the recall.
 - **Failure is non-fatal.** An empty `request` returns a usage message; an internal error returns `need_route failed: …`, and `mode=inventory` still works for diagnosis.
 
 ## Compatibility
