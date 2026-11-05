@@ -51,6 +51,15 @@ author's machine.
   scoring, rendering and discovery fallbacks.
 - `README.md` (English), `README.zh-CN.md` (Chinese), `CONTRIBUTING.md`.
 
+### Documentation
+
+- `README.md` restructured as an open-source landing page: table of contents,
+  TL;DR, "why this exists", worked example, pipeline diagram, troubleshooting
+  table, FAQ, design guarantees, roadmap and project layout.
+- `README.zh-CN.md` brought to full parity with the English README.
+- The `mode` parameter description now lists `brief`, matching the behaviour the
+  tool has always had.
+
 ### Removed
 
 - Hardcoded domain → skill lists and domain → tool lists (returned non-existent names

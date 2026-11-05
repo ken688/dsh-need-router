@@ -1,39 +1,112 @@
 # dsh-need-router
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%E2%89%A522.12-3c873a)](https://nodejs.org/)
+[![DSH plugin](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4b6bfb)](https://github.com/deepseek-ai)
+
 English · [中文](README.zh-CN.md)
 
-A capability router plugin for **DeepSeek Harness (DSH)**. Given one request, it answers three questions cheaply:
+> **A capability router for DeepSeek Harness (DSH).** One request in; back comes the capability domains it touches, the skills your machine actually has for it, and the tools this session can use — plus the first concrete step and what to skip this time.
 
-- which **capability domains** does this touch?
-- which of the **skills installed on this machine** can serve it?
-- which **tools visible in this session** are actually useful?
+It is a routing **hint**, not an executor: it never loads a skill, calls a tool, or touches the network. Every recommendation is drawn from the live registry of the machine it runs on, so the same package behaves correctly on a machine with a completely different skill set.
 
-It also names the first concrete step and what can be skipped. It does not load, call, or dispatch anything — it is a routing hint for the model.
+---
 
-The point of 0.2.0 is that it is **generic**. Nothing about the author's machine is baked in: skills and tools are read from the live host registry on every call, so the same package behaves correctly on a machine with a completely different skill set.
+## Table of contents
 
-## What v0.2.0 changed
+- [TL;DR](#tldr)
+- [Why this exists](#why-this-exists)
+- [What it answers](#what-it-answers)
+- [See it in action](#see-it-in-action)
+- [How it works](#how-it-works)
+- [Install](#install)
+- [Usage](#usage)
+- [Output modes](#output-modes)
+- [Configuration](#configuration)
+- [Adding your own capability domain](#adding-your-own-capability-domain)
+- [Built-in capability domains](#built-in-capability-domains-17)
+- [Cost](#cost)
+- [Compatibility and requirements](#compatibility-and-requirements)
+- [Security and privacy](#security-and-privacy)
+- [Design guarantees](#design-guarantees)
+- [Known limits](#known-limits)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Development](#development)
+- [Project layout](#project-layout)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
-v0.1 hardcoded a fixed list of capability domains together with the author's own skill and tool names, and only scanned `~/.agents/skills` and `~/.dsh/skills`. It therefore only worked on the author's machine: on any other box it recommended skills that were not installed, missed skills that lived elsewhere, and could not be extended without editing source.
+## TL;DR
 
-| Layer | v0.1 | v0.2.0 |
-|---|---|---|
-| Capability domains | Hardcoded, with skill names per domain | Built-in taxonomy of capability areas only — bilingual, no skill names, no personal paths; extended through config |
-| Skills | Hardcoded per domain; two scanned directories | Live host skill registry (`ctx.get('skills')`), scoped listing; filesystem `SKILL.md` scan only as a fallback |
-| Tools | Hardcoded per domain | Live tool registry (`ctx.get('tools').schemas(scope)`); recommendations rest on evidence, not a name list |
-| Output language | Chinese | Follows the request (`locale: auto\|zh\|en`) |
+- **What it is:** a DSH plugin that adds one tool, `need_route`, and a one-sentence system-prompt hint.
+- **What it costs:** ~300 tokens of tool schema per request, plus 80–600 tokens when you actually call it.
+- **What it never does:** load a skill, run a tool, call a model, or write a file. It answers, then stops.
+- **Why generic:** v0.2.0 reads skills and tools from the host registry on every call. No skill names, tool names or personal paths are baked into the source.
 
-Hard guarantees, enforced by the code rather than by convention:
+## Why this exists
 
-- It **never recommends a skill that is not installed** in the current scope, or a **tool that is not visible** to the session. Candidates come from the live inventory; nothing is synthesised.
-- Skill sources can be filtered with `skillSources` / `excludeSources`, so you can keep, say, only `user` skills out of the ranking.
-- Tool recommendations are **evidence-based**: an explicit mention in the request, a match between a token of the tool name and the request, a name token that equals the vocabulary of a matched domain, or the tool being named inside the body of a recommended skill. There is no hardcoded tool list.
-- The built-in taxonomy describes **capability areas only**. You extend it through config (`domains`, `extraKeywords`, `disableDomains`) instead of patching source.
+An agent with a large skill catalogue has a routing problem before it has an execution problem. On the author's machine alone there are more than a hundred skills spread over five roots (`~/.agents`, `~/.dsh`, `~/.claude`, `~/.trae-cn`, and per-project directories). Reading skill descriptions to decide what to load costs thousands of tokens per attempt; guessing costs a wrong `SKILL.md` and a retry.
+
+A deterministic pass over the request can answer the cheap questions first:
+
+- Which capability areas does this touch?
+- Which installed skills can actually serve it?
+- Which of the tools visible right now are relevant?
+- What is the first concrete step, and what can be skipped?
+
+That answer is worth one small tool call when it prevents loading the wrong skill — and worth skipping entirely for plain conversation or an obvious single step.
+
+## What it answers
+
+| Question | Example answer |
+|---|---|
+| Which capability domains? | `Code & Engineering(strong)`, `Data Analysis(medium)` |
+| Which installed skills? | `code-review(user)`, `test-driven-development(user)` — never a skill that is not installed |
+| Which visible tools? | `ops_bash`, `ops_grep` — never a tool the session cannot call |
+| What first, what to skip? | "Search first (grep / list files), read the file, then edit — never guess." / skip `Documents & Spreadsheets` |
+
+## See it in action
+
+Example output for `Build a chart from this Excel pivot table`, against a sample registry of two user skills and one tool. The names below exist only in this example — the plugin would read whatever your machine actually has:
+
+```text
+verdict: Data Analysis(medium) + Documents & Spreadsheets(medium)
+matched: pivot table, chart, excel, pivot
+skills: excel-tools(user), chart-maker(user)
+tools: no dedicated tool matched; follow the commands in the skill
+first step: Read the header and a few sample rows (shape, columns, missing values) before choosing an analysis.
+· Documents & Spreadsheets note: Load exactly one subtype skill for the file type; recalculate after formula edits and render before delivery.
+skip this time: Code & Engineering
+```
+
+The same request in `brief` mode, for when you only want the shortlist:
+
+```text
+brief: Data Analysis(medium) + Documents & Spreadsheets(medium) | skills excel-tools,chart-maker | tools -
+```
+
+## How it works
+
+```text
+request text
+   │  NFKC normalisation · lowercase · stop-word filtering
+   ▼
+domain scoring ── keywords · file extensions · negative rules
+   │
+   ├──► skills   ← live host skill registry (scoped to the calling agent)
+   │        └──► tool evidence read from the bodies of the top skills
+   └──► tools    ← live session tool schemas
+   ▼
+render: brief · route · inventory · json — in the language of the request
+```
+
+Nothing is cached across plugin lifetimes except short TTLs (5 minutes for a route, 5 seconds for the inventory, 5 minutes for skill bodies). The same request against the same inventory always produces the same ranking.
 
 ## Install
 
-DSH plugin, **host-only** (it registers a tool and a system-prompt hint; there is no UI).
+DSH plugin, **host-only** — it registers a tool and a system-prompt hint; there is no UI.
 
 1. Add the dependency and the bundle to your profile's `package.json`:
 
@@ -50,10 +123,12 @@ DSH plugin, **host-only** (it registers a tool and a system-prompt hint; there i
 }
 ```
 
-2. Install profile dependencies again (or let the plugin manager install it once), then restart the host.
+2. Reinstall the profile dependencies (or let the plugin manager install it once), then restart the host.
 3. The session gains a `need_route` tool plus a one-sentence system-prompt hint.
 
 For local development, depend on the checkout with a `link:` specifier instead of the GitHub specifier — edits then need only a plugin reload, not a restart.
+
+**Uninstall:** remove the `dsh-need-router` dependency and bundle entry from the profile `package.json`, reinstall the profile, and restart — or disable it in the plugin manager.
 
 ## Usage
 
@@ -63,17 +138,8 @@ For local development, depend on the checkout with a `link:` specifier instead o
 |---|---|---|
 | `request` | string (required) | The user request verbatim. Longer input routes more accurately. |
 | `brief` | boolean | Return a single compact line instead of the full route. |
-| `mode` | string | `route` (default) \| `brief` \| `inventory` \| `json` |
+| `mode` | string | `route` (default) · `brief` · `inventory` · `json` |
 | `limit` | integer | Maximum capability domains to return (clamped to 1–8). Defaults to `maxDomains`. |
-
-Output modes:
-
-| Mode | Content | Cost (approx.) |
-|---|---|---|
-| `brief` (or `brief=true`) | One line: domains with confidence, then skill and tool names | 80–150 tokens |
-| `route` (default) | Verdict, matched keywords, skills, tools, first step, notes for secondary domains, what to skip | 300–600 tokens |
-| `inventory` | Installed plugins, skill catalogue with its source breakdown, tools visible to the session | depends on environment |
-| `json` | The same routing result as machine-readable JSON, for scripts | depends on output |
 
 ```text
 need_route(request="Audit the Excel budget workbook, fix the broken pivot formula, then post the summary to the team chat")
@@ -83,71 +149,24 @@ need_route(request="Audit the Excel budget workbook, fix the broken pivot formul
 need_route(request="...", brief=true)
 ```
 
-Example output for `Build a chart from this Excel pivot table`, against a sample registry of two user skills and one tool (the names below exist only in this example — the plugin would read whatever your machine actually has):
-
 ```text
-brief: Data Analysis(medium) + Documents & Spreadsheets(medium) | skills excel-tools,chart-maker | tools -
+need_route(request="...", mode="json")
 ```
 
-```text
-verdict: Data Analysis(medium) + Documents & Spreadsheets(medium)
-matched: pivot table, chart, excel, pivot
-skills: excel-tools(user), chart-maker(user)
-tools: no dedicated tool matched; follow the commands in the skill
-first step: Read the header and a few sample rows (shape, columns, missing values) before choosing an analysis.
-· Documents & Spreadsheets note: Load exactly one subtype skill for the file type; recalculate after formula edits and render before delivery.
-skip this time: Code & Engineering
-```
-
-The `(user)` suffix is the skill's source tag — `bundled`, `runtime`, `project`, `custom`, `user`, or a provider id when none of those match. Hide it with `showSkillSource: false`.
-
-Output language follows the request: a Chinese request gets a Chinese answer, an English request an English one, and mixed requests count as Chinese. Set `locale` to force one language.
+Output language follows the request: a Chinese request gets a Chinese answer, an English one an English one, and mixed requests count as Chinese. Set `locale` to force a language.
 
 Plain conversation and single-step work you already know how to do (read a file, run a command, edit code) do **not** need a call — the injected prompt hint says exactly that.
 
-## How it decides
+## Output modes
 
-Input is NFKC-normalised and lowercased. Latin keywords match on word boundaries (with optional plural `s`/`es` for keywords of three or more characters, so `go` does not match `good`); CJK keywords match as substrings.
+| Mode | Content | Cost (approx.) |
+|---|---|---|
+| `brief` (or `brief=true`) | One line: domains with confidence, then skill and tool names | 80–150 tokens |
+| `route` (default) | Verdict, matched keywords, skills, tools, first step, notes for secondary domains, what to skip | 300–600 tokens |
+| `inventory` | Installed plugins, skill catalogue with its source breakdown, tools visible to the session | depends on environment |
+| `json` | The same routing result as machine-readable JSON, for scripts | depends on output |
 
-**Capability domains** — scored over the request text:
-
-| Signal | Weight |
-|---|---|
-| Keyword hit (keyword ≥ 3 chars / < 3 chars) | +2 / +1.2 |
-| File-extension hit (`.xlsx`, `.mp4`, …) | +3 |
-| Negative rule hit (e.g. "error / stack trace" suppresses the document and academic domains) | −3 |
-| Confidence bucket | strong ≥ 6, medium ≥ 3, weak > 0 |
-
-**Skills** — ranked only among what the machine actually has:
-
-| Signal | Weight |
-|---|---|
-| Skill name written in the request (names ≥ 4 chars) | +8 |
-| A token of the skill name appears in the request | +3 per token (cap 6; +1.5 when it only matches a domain keyword) |
-| A matched domain keyword appears in the skill's description / when-to-use | +2 per keyword (cap 8) |
-| Request word appears in the description | +1 per word (cap 4) |
-| CJK n-gram appears in the description | +0.6 per gram (cap 3) |
-| Skill name carries the id of a top-3 domain (`code-review` ↔ `code`) | +2 |
-| Inclusion threshold | ≥ 3 points |
-
-**Tools** — ranked only among what the session can currently call:
-
-| Signal | Weight |
-|---|---|
-| Tool name written in the request (names ≥ 5 chars) | +6 |
-| A token of the tool name appears in the request | +3 per token (cap 6) |
-| A whole token of the tool name equals a keyword of a matched domain (e.g. `memory` ↔ the memory domain) | +3 |
-| Named inside the body of a recommended skill | +3 × mention weight (weight = min(skill score / 5, 2)) |
-| Description word overlap | +0.4 per word (cap 1.5 — never enough to qualify alone) |
-| Inclusion threshold | ≥ 3 points |
-
-The skill-body pass reads the bodies of the **top 4** recommended skills (2 s timeout each, 5 min cache) and only counts *distinctive* tool names as evidence — names of four or more characters that contain `_` or `-`, or that are ten or more characters long. A tool literally called `skill` does not "appear" in every skill.
-
-Function words are filtered before any of this — English stop words (`this`, `the`, `please`, …) and their Chinese equivalents — so a long generic description cannot win on noise alone.
-
-Results are cached per plugin lifetime: identical request + scope + `limit` for 5 minutes, inventory for 5 seconds, skill bodies for 5 minutes. Caches are dropped with the plugin fiber.
-
-Everything is deterministic: the same request and the same inventory produce the same ranking.
+`inventory` is also the diagnostic mode: if routing looks wrong, it shows exactly which skills the plugin can see and where they came from.
 
 ## Configuration
 
@@ -178,7 +197,7 @@ Config is read from the profile's plugin config (the `config:` block of the `nee
 | `contentTtlMs` | `300000` | Skill-body cache TTL used for tool evidence. |
 | `routeCacheTtlMs` | `300000` | Identical-request route cache TTL. |
 
-### Adding your own capability domain
+## Adding your own capability domain
 
 `hint` and `firstAction` accept either a plain string or a `{ zh, en }` object; a plain string is filed under the default hint language (`en` when `locale` is `en`, otherwise `zh`). Keywords are appended to the domain, never replace it.
 
@@ -199,9 +218,9 @@ Config is read from the profile's plugin config (the `config:` block of the `nee
       data: ["retention rate", "churn rate"]
 ```
 
-A custom `id` that already exists (`finance` does not; `data` does) keeps the built-in keywords and merges yours on top, and a `disabled: true` on such an entry removes that built-in domain.
+A custom `id` that already exists (`finance` does not; `data` does) keeps the built-in keywords and merges yours on top; adding `disabled: true` to such an entry removes that built-in domain.
 
-## Built-in domains (17)
+## Built-in capability domains (17)
 
 These are capability areas, not skill names — no entry names a skill or a tool.
 
@@ -242,24 +261,64 @@ Per call:
 
 The arithmetic that justifies it: a single call that stops you from loading one wrong `SKILL.md` (2–6k tokens) and then reading the right one pays for itself many times over. If the request is plain conversation or an obvious single step, skip the call.
 
-## Behaviour and limits
-
-- **Read-only.** It writes no files, sends no network requests, and changes no configuration.
-- **What it reads:** the host's merged skill registry (when present), this session's visible tool schemas, and the profile `package.json` dependency names. Only in the filesystem fallback does it scan skill directories: `<root>/<skill>/SKILL.md` under the project's `.agents/skills` and `.claude/skills`, then `~/.agents/skills`, `~/.dsh/skills`, `~/.claude/skills`, `~/.codex/skills`, any other `~/.<dir>/skills`, plus `skillRoots`.
-- **It routes; it does not act.** It never loads a skill, calls a tool, or re-ranks by model preference. It has no memory of past calls beyond the caches.
-- **It can be wrong.** Domains are keyword-driven; a request worded unusually may land in a neighbouring domain. That is why `firstAction` advice is phrased as advice and not as a gate.
-- **Cross-lingual matching is lexical, not semantic.** Domain vocabulary is bilingual, so a Chinese request still finds the right capability area on an English-only machine. Skill and tool *names and descriptions* are matched in their own language, though: with a corpus whose descriptions are English only, a Chinese request may return the domain and no skill picks. It never invents a name; adding Chinese descriptions (or Chinese keywords) to your skills fixes the recall.
-- **Failure is non-fatal.** An empty `request` returns a usage message; an internal error returns `need_route failed: …`, and `mode=inventory` still works for diagnosis.
-
-## Compatibility
+## Compatibility and requirements
 
 - A DSH host that provides the `tools` and `systemPrompt` services.
 - The `skills` service is used when available (`ctx.get('skills')`, scoped to the calling agent); without it the plugin falls back to scanning `SKILL.md` files.
 - Node.js **≥ 22.12**; ESM only; peer dependencies on `@deepseek-ai/cordis`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/schemastery`.
+- No network access, no API key, no model call: routing is deterministic keyword scoring.
 
-## Uninstall
+## Security and privacy
 
-Remove the `dsh-need-router` dependency from the profile `package.json`, re-run the profile install, and restart — or disable it in the plugin manager.
+- **Read-only.** It writes no files, sends no network requests, and changes no configuration.
+- **What it reads:** the host's merged skill registry (when present), this session's visible tool schemas, and the profile `package.json` dependency names. Only in the filesystem fallback does it scan skill directories: `<root>/<skill>/SKILL.md` under the project's `.agents/skills` and `.claude/skills`, then `~/.agents/skills`, `~/.dsh/skills`, `~/.claude/skills`, `~/.codex/skills`, any other `~/.<dir>/skills`, plus `skillRoots`.
+- **What it never sends:** no request text, skill names or tool names leave the process. There is no telemetry.
+- **Output contains only names that already exist** on the host — it never prefixes or invents a skill id.
+
+## Design guarantees
+
+These are enforced by the code, not by convention:
+
+- It **never recommends a skill that is not installed** in the current scope, or a **tool that is not visible** to the session. Candidates come from the live inventory; nothing is synthesised.
+- Skill sources can be filtered with `skillSources` / `excludeSources`, so you can keep, say, only `user` skills in the ranking.
+- Tool recommendations are **evidence-based**: an explicit mention in the request, a match between a token of the tool name and the request, a name token that equals the vocabulary of a matched domain, or the tool being named inside the body of a recommended skill. There is no hardcoded tool list.
+- The built-in taxonomy describes **capability areas only**. You extend it through config (`domains`, `extraKeywords`, `disableDomains`) instead of patching source.
+- Routing is **deterministic** and local: same request + same inventory ⇒ same ranking, every time.
+- **Failure is non-fatal.** An empty `request` returns a usage message; an internal error returns `need_route failed: …`, and `mode=inventory` still works for diagnosis.
+
+## Known limits
+
+- **Cross-lingual matching is lexical, not semantic.** Domain vocabulary is bilingual, so a Chinese request still finds the right capability area on an English-only machine. Skill and tool *names and descriptions* are matched in their own language, though: with a corpus whose descriptions are English only, a Chinese request may return the domain and no skill picks. It never invents a name; adding Chinese descriptions (or Chinese keywords) to your skills fixes the recall.
+- **It can be wrong.** Domains are keyword-driven; a request worded unusually may land in a neighbouring domain. That is why `firstAction` advice is phrased as advice and not as a gate.
+- **It routes; it does not act.** It never loads a skill, calls a tool, or re-ranks by model preference. It has no memory of past calls beyond the caches.
+- **Tool noise is possible.** A generic tool whose name contains a domain keyword (for example a development helper named `build_*`) can appear in an unrelated domain. Pin your preference with `excludeTools`, or narrow it with `matchTools: false`.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| `need_route` is not in the tool list | Is `dsh-need-router` in `dsh.profile.bundles`? Did the host restart after the install? |
+| It recommends skills you do not want | Filter with `skillSources` / `excludeSources`; hide tools with `excludeTools`; disable a whole domain with `disableDomains`. |
+| It returns domains but no skills | Run `mode=inventory` and check the skill source breakdown. In the filesystem fallback, confirm the skill roots; with English-only descriptions, add Chinese keywords/descriptions. |
+| A domain never appears | Add words through `extraKeywords`, or define a custom domain; check that a negative rule is not suppressing it. |
+| Wrong language in the output | Set `locale: zh` or `locale: en` instead of `auto`. |
+| An error is returned | `need_route failed: …` is non-fatal; `mode=inventory` still works and usually shows the cause. |
+
+## FAQ
+
+**Does it call an LLM?** No. Domain, skill and tool scoring is plain deterministic code. No model, no network, no key.
+
+**Does it load or run the skills it recommends?** No. It only names them. The model decides whether to load one.
+
+**Why not just let the model choose?** It can — but a 100+ skill catalogue makes that choice expensive and inconsistent. A cheap deterministic pre-pass narrows the candidate set; the model still makes the final decision.
+
+**Will it work with my skill set?** Yes — the ranking is computed from your registry at call time. If a skill is not installed in the calling scope, it cannot be recommended.
+
+**Does it work outside DSH?** The scoring core (`lib/text.js`, `lib/taxonomy.js`, `lib/match.js`, `lib/render.js`) is dependency-free ESM and could be wrapped by another host, but this package targets DSH services (`tools`, `systemPrompt`, optional `skills`). No other host adapter ships today.
+
+**Why 17 domains?** They cover the broad capability areas a general agent encounters. The list is data, not code: add, extend or disable domains through config.
+
+**Does it send my requests anywhere?** No. Nothing leaves the process; there is no telemetry.
 
 ## Development
 
@@ -267,16 +326,32 @@ Remove the `dsh-need-router` dependency from the profile `package.json`, re-run 
 npm test   # node --test; pure modules, no dependencies to install
 ```
 
-| File | Responsibility |
-|---|---|
-| `lib/text.js` | normalisation, keyword matching, CJK n-grams, stop words, language detection |
-| `lib/taxonomy.js` | built-in domains, extension signals, negative rules |
-| `lib/discover.js` | live inventory: skills service, tool registry, profile plugins, filesystem fallback |
-| `lib/match.js` | scoring and composition (domains → skills → tool evidence) |
-| `lib/render.js` | brief / route / inventory rendering and truncation, zh + en |
-| `lib/index.js` | plugin wiring: `defineTool`, config schema, caches, prompt hint |
+The suite is dependency-free and covers text matching, taxonomy, scoring, rendering and the discovery fallbacks. See [CONTRIBUTING.md](CONTRIBUTING.md) for the test rules, how to add a domain, and the PR checklist.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the test rules, how to add a domain, and the PR checklist.
+## Project layout
+
+```text
+lib/text.js        normalisation, keyword matching, CJK n-grams, stop words, language detection
+lib/taxonomy.js    built-in domains, extension signals, negative rules
+lib/discover.js    live inventory: skills service, tool registry, profile plugins, filesystem fallback
+lib/match.js       scoring and composition (domains → skills → tool evidence)
+lib/render.js      brief / route / inventory rendering and truncation, zh + en
+lib/index.js       plugin wiring: defineTool, config schema, caches, prompt hint
+test/              node --test suites for every module above
+```
+
+## Roadmap
+
+Candidate ideas, not commitments — feedback and PRs are welcome:
+
+- Optional semantic (embedding) fallback for cross-lingual skill recall, off by default.
+- More locale packs for the built-in taxonomy (the structure is already bilingual).
+- Benchmarks against a few public skill catalogues, run locally.
+- Richer `json` output so external routers and UIs can consume it directly.
+
+## Contributing
+
+Issues and pull requests are welcome. Keep the core constraints intact: no skill names, tool names or personal paths in `lib/taxonomy.js`; recommendations must stay evidence-based; tests must pass without installing anything. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
