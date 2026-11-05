@@ -87,6 +87,22 @@ test('collectToolMentions reads evidence out of skill bodies', () => {
   assert.equal(mentions[0].skill, 'bug-hunt')
 })
 
+test('plain-word tool names need a code-span reference', () => {
+  const tools = [{ name: 'memory', description: 'Memory tool' }, { name: 'present', description: 'Present files' }]
+  const prose = collectToolMentions(
+    [{ name: 'memory-consolidate', score: 6 }],
+    new Map([['memory-consolidate', 'Recent memory should be merged; present the result to the user.']]),
+    tools
+  )
+  assert.deepEqual(prose, [])
+  const codeSpan = collectToolMentions(
+    [{ name: 'memory-consolidate', score: 6 }],
+    new Map([['memory-consolidate', 'Use the `memory` tool with `replace` or `archive`.']]),
+    tools
+  )
+  assert.deepEqual(codeSpan.map((entry) => entry.name), ['memory'])
+})
+
 test('tool mentions from skills feed the tool ranking', () => {
   const mentions = [{ name: 'ops_bash', skill: 'bug-hunt', weight: 1.6 }]
   const ranked = matchTools(normalize('定位这个问题'), TOOLS, mentions, { excludeTools: ['need_route'] })
