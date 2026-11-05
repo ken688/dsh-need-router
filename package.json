@@ -1,7 +1,7 @@
 {
   "name": "dsh-need-router",
-  "version": "0.1.0",
-  "description": "需求判断器：读一条请求，判定它属于哪些能力域，返回该调用的技能与工具短名单，让模型不再盲扫全部能力。",
+  "version": "0.2.0",
+  "description": "Capability router for DeepSeek Harness: map one request to capability domains, the skills actually installed on this machine, and the tools visible in this session. 需求判断器：把请求映射到能力域、本机已装技能与本会话可见工具。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -13,8 +13,14 @@
     "lib",
     "cordis.patch.yml",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
+  "scripts": {
+    "test": "node --test"
+  },
   "engines": {
     "node": ">=22.12.0"
   },
@@ -31,10 +37,15 @@
   "keywords": [
     "dsh",
     "dsh-plugin",
+    "deepseek-harness",
     "cordis",
     "agent",
+    "agent-skills",
+    "skills",
     "router",
     "skill-routing",
+    "capability",
+    "intent-routing",
     "llm"
   ],
   "author": "ken688",
