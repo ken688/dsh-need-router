@@ -109,6 +109,25 @@ test('tool mentions from skills feed the tool ranking', () => {
   assert.equal(ranked[0]?.name, 'ops_bash')
 })
 
+test('tool names bridge to the matched domain vocabulary', () => {
+  const tools = [
+    { name: 'memory', description: 'Read and write durable memories' },
+    { name: 'dev_stage_list', description: 'List staged tools' },
+    { name: 'video_probe', description: 'Inspect a local video file' }
+  ]
+  const result = routeRequest({
+    request: '记住我的偏好，顺便把这件事加到待办',
+    catalog,
+    skills: [],
+    tools,
+    mentioned: [],
+    config: {}
+  })
+  assert.ok(result.tools.some((tool) => tool.name === 'memory'))
+  assert.ok(!result.tools.some((tool) => tool.name === 'video_probe'))
+  assert.ok(!result.tools.some((tool) => tool.name === 'dev_stage_list'), 'partial keyword matches must not qualify')
+})
+
 test('skill ranking is limited by config', () => {
   const result = route('excel 表格 数据 透视 图表 csv 统计', { skillLimit: 2 })
   assert.ok(result.skills.length <= 2)

@@ -28,7 +28,7 @@ Hard guarantees, enforced by the code rather than by convention:
 
 - It **never recommends a skill that is not installed** in the current scope, or a **tool that is not visible** to the session. Candidates come from the live inventory; nothing is synthesised.
 - Skill sources can be filtered with `skillSources` / `excludeSources`, so you can keep, say, only `user` skills out of the ranking.
-- Tool recommendations are **evidence-based**: an explicit mention in the request, a match between a token of the tool name and the request, or the tool being named inside the body of a recommended skill. There is no hardcoded tool list.
+- Tool recommendations are **evidence-based**: an explicit mention in the request, a match between a token of the tool name and the request, a name token that equals the vocabulary of a matched domain, or the tool being named inside the body of a recommended skill. There is no hardcoded tool list.
 - The built-in taxonomy describes **capability areas only**. You extend it through config (`domains`, `extraKeywords`, `disableDomains`) instead of patching source.
 
 ## Install
@@ -136,6 +136,7 @@ Input is NFKC-normalised and lowercased. Latin keywords match on word boundaries
 |---|---|
 | Tool name written in the request (names ≥ 5 chars) | +6 |
 | A token of the tool name appears in the request | +3 per token (cap 6) |
+| A whole token of the tool name equals a keyword of a matched domain (e.g. `memory` ↔ the memory domain) | +3 |
 | Named inside the body of a recommended skill | +3 × mention weight (weight = min(skill score / 5, 2)) |
 | Description word overlap | +0.4 per word (cap 1.5 — never enough to qualify alone) |
 | Inclusion threshold | ≥ 3 points |
